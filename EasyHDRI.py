@@ -25,11 +25,12 @@ from bpy.utils import previews
 # Add-on info
 bl_info = {
     "name": "Easy HDRI",
-    "version": (1, 0, 2),
+    "version": (1, 0, 1),
     "blender": (2, 80, 0),
     "location": "View3D > Properties > Easy HDRI",
     "description": "Load and test your HDRIs easily.",       
     "category": "3D View"}
+
 
 # Preview collections
 preview_collections = {}
@@ -163,8 +164,8 @@ def create_world_nodes():
     scn = bpy.context.scene
     worlds = bpy.data.worlds
     # Make sure the render engine is Cycles or Eevee
-    if not scn.render.engine in ['CYCLES', 'BLENDER_EEVEE']:
-        scn.render.engine = 'BLENDER_EEVEE'
+    if not scn.render.engine in ['CYCLES', 'BLENDER_EEVEE_NEXT']:
+        scn.render.engine = 'BLENDER_EEVEE_NEXT'
     # Add a new world "EasyHDR", or reset the existing one
     if not 'EasyHDR' in worlds:
         world = bpy.data.worlds.new("EasyHDR")        
@@ -183,7 +184,7 @@ def create_world_nodes():
     background = world.node_tree.nodes.new(type="ShaderNodeBackground")
     gamma = world.node_tree.nodes.new(type="ShaderNodeGamma")
     saturation = world.node_tree.nodes.new(type="ShaderNodeHueSaturation")
-    color = world.node_tree.nodes.new(type="ShaderNodeMix")
+    color = world.node_tree.nodes.new(type="ShaderNodeMixRGB")
     math_multiply = world.node_tree.nodes.new(type="ShaderNodeMath")
     math_divide = world.node_tree.nodes.new(type="ShaderNodeMath")
     math_add = world.node_tree.nodes.new(type="ShaderNodeMath")    
@@ -203,8 +204,7 @@ def create_world_nodes():
     math_add.name = 'Math_add'   
     math_add.operation = 'ADD'   
     math_add.inputs[1].default_value = 1.0
-    color.data_type = 'RGBA'
-    color.blend_type = 'MULTIPLY'
+    color.blend_type = 'MULTIPLY'  
     color.inputs[0].default_value = 0.0
         
     # Links
@@ -212,12 +212,12 @@ def create_world_nodes():
     world.node_tree.links.new(mapping.outputs[0], env.inputs[0])
     world.node_tree.links.new(env.outputs[0], gamma.inputs[0])
     world.node_tree.links.new(gamma.outputs[0], saturation.inputs[4])
-    world.node_tree.links.new(saturation.outputs[0], color.inputs[6])
+    world.node_tree.links.new(saturation.outputs[0], color.inputs[1])
     world.node_tree.links.new(env.outputs[0], math_multiply.inputs[0])
     world.node_tree.links.new(math_multiply.outputs[0], math_divide.inputs[0])
     world.node_tree.links.new(math_divide.outputs[0], math_add.inputs[0])
     world.node_tree.links.new(math_add.outputs[0], background.inputs[1])
-    world.node_tree.links.new(color.outputs[2], background.inputs[0])
+    world.node_tree.links.new(color.outputs[0], background.inputs[0])
     world.node_tree.links.new(background.outputs[0], output.inputs[0])    
     
     # Nodes location    
@@ -489,76 +489,72 @@ class EASYHDRI_PT_main(Panel):
             prev_list = len(scn['previews_list'])
         if len(preview_collections["prev"]) > 0 and prev_list > 0:
             active_hdr = scn.prev        
-        if scn.render.engine in ['CYCLES', 'BLENDER_EEVEE']:
-            row = col.row(align=True)
-            if os.path.exists(dir):
-                if not dir in favs:
-                    row.operator("easyhdr.add_to_fav", text = '', icon = 'SOLO_ON')
-                else: row.operator("easyhdr.remove_from_fav", text = '', icon = 'X')            
-            row.prop(scn, "previews_dir", text = '')
-            if recursion:
-                col.prop(scn, "sub_dirs", text = 'Recursion level')
-            if len(preview_collections["prev"]) > 0 and prev_list > 0:
-                col.label(text = active_hdr, icon = 'IMAGE_DATA')                     
-            row = layout.row()
-            row.template_icon_view(scn, "prev", show_labels=True)
-            col = row.column(align=True)
-            col.operator("easyhdr.reload_previews", text = '',  icon = 'FILE_REFRESH')
-            col.prop(scn, 'favs', text = '', icon = 'SOLO_OFF', icon_only=True)
-            col.menu("EASYHDRI_MT_settings_menu", text = '', icon = 'TOOL_SETTINGS')
-            if scn.render.engine in ['CYCLES', 'BLENDER_EEVEE']:
-                col.prop(scn.render, 'film_transparent', text = '', icon = 'FILE_IMAGE')            
-            col = layout.column()                         
-            col = layout.column()                
-            if len(preview_collections["prev"]) > 0 and prev_list > 0:
-                box = col.box() 
-                box.scale_y = 1.0                             
-                row = box.row(align = True)
-                row.scale_y = 1.7
-                row.operator("easyhdr.previous", text = '',  icon = 'TRIA_LEFT')
-                #row1 = row.row() 
-                #row1.scale_y = 1.7                
-                row.operator("easyhdr.load_image", icon = 'IMAGE_DATA')                               
-                row.operator("easyhdr.next", text = '', icon = 'TRIA_RIGHT')
-            else:
-                col.label(text = 'The list is empty', icon = 'ERROR')             
-            if check_world_nodes() == 'Create':
-                col.operator("easyhdr.create_world", icon = 'WORLD_DATA')
-            elif check_world_nodes() == 'Fix':
-                col.operator("easyhdr.create_world", text = 'Fix World nodes', icon = 'WORLD_DATA')                    
-            else:                    
-                col = layout.column()                
-                nodes = scn.world.node_tree.nodes
-                box = col.box()
-                col = box.column()
-                col.label(text = 'World Settings:', icon = 'WORLD_DATA')
-                col = box.column()                
-                if 'Math_multiply' in nodes:
-                    col.prop(nodes['Math_multiply'].inputs[1], "default_value", text = 'Sun Strength')
-                if 'Math_add' in nodes:
-                    col.prop(nodes['Math_add'].inputs[1], "default_value", text = 'Sky Strength')    
-                col = box.column()
-                if 'Environment' in nodes:
-                    col.prop(nodes['Environment'], "projection", text = '')                                            
-                if 'Mapping' in nodes:
-                    col = box.column()
-                    col.prop(nodes['Mapping'], "rotation")                
-                if 'Mix' in nodes:
-                    col = box.column(align = True)
-                    col.prop(nodes['Mix'].inputs[7], "default_value", text = "Tint")        
-                    col.prop(nodes['Mix'].inputs[0], "default_value", text = "Factor")
-                if 'Gamma' in nodes:
-                    col = box.column()
-                    col.prop(nodes['Gamma'].inputs[1], "default_value", text = "Gamma")
-                if 'Saturation' in nodes:
-                    col = box.column()
-                    col.prop(nodes['Saturation'].inputs[1], "default_value", text = "Saturation")                
-                if 'Mapping' in nodes:
-                    col = box.column()
-                    col.prop(nodes['Mapping'].inputs[2], "default_value", text = "Rotation")
+        
+    
+        row = col.row(align=True)
+        if os.path.exists(dir):
+            if not dir in favs:
+                row.operator("easyhdr.add_to_fav", text = '', icon = 'SOLO_ON')
+            else: row.operator("easyhdr.remove_from_fav", text = '', icon = 'X')            
+        row.prop(scn, "previews_dir", text = '')
+        if recursion:
+            col.prop(scn, "sub_dirs", text = 'Recursion level')
+        if len(preview_collections["prev"]) > 0 and prev_list > 0:
+            col.label(text = active_hdr, icon = 'IMAGE_DATA')                     
+        row = layout.row()
+        row.template_icon_view(scn, "prev", show_labels=True)
+        col = row.column(align=True)
+        col.operator("easyhdr.reload_previews", text = '',  icon = 'FILE_REFRESH')
+        col.prop(scn, 'favs', text = '', icon = 'SOLO_OFF', icon_only=True)
+        col.menu("EASYHDRI_MT_settings_menu", text = '', icon = 'TOOL_SETTINGS')
+        if scn.render.engine in ['CYCLES', 'BLENDER_EEVEE_NEXT']:
+            col.prop(scn.render, 'film_transparent', text = '', icon = 'FILE_IMAGE')            
+        col = layout.column()                         
+        col = layout.column()                
+        if len(preview_collections["prev"]) > 0 and prev_list > 0:
+            box = col.box() 
+            box.scale_y = 1.0                             
+            row = box.row(align = True)
+            row.scale_y = 1.7
+            row.operator("easyhdr.previous", text = '',  icon = 'TRIA_LEFT')
+            #row1 = row.row() 
+            #row1.scale_y = 1.7                
+            row.operator("easyhdr.load_image", icon = 'IMAGE_DATA')                               
+            row.operator("easyhdr.next", text = '', icon = 'TRIA_RIGHT')
         else:
-            col.label(text = 'Not compatible with this render engine', icon = 'INFO')
-            col.prop(scn.render, 'engine')
+            col.label(text = 'The list is empty', icon = 'ERROR')             
+        if check_world_nodes() == 'Create':
+            col.operator("easyhdr.create_world", icon = 'WORLD_DATA')
+        elif check_world_nodes() == 'Fix':
+            col.operator("easyhdr.create_world", text = 'Fix World nodes', icon = 'WORLD_DATA')                    
+        else:                    
+            col = layout.column()                
+            nodes = scn.world.node_tree.nodes
+            box = col.box()
+            col = box.column()
+            col.label(text = 'World Settings:', icon = 'WORLD_DATA')
+            col = box.column()                
+            if 'Math_multiply' in nodes:
+                col.prop(nodes['Math_multiply'].inputs[1], "default_value", text = 'Sun Strength')
+            if 'Math_add' in nodes:
+                col.prop(nodes['Math_add'].inputs[1], "default_value", text = 'Sky Strength')    
+            col = box.column()
+            if 'Environment' in nodes:
+                col.prop(nodes['Environment'], "projection", text = '')                                            
+            if 'Mapping' in nodes:
+                col = box.column()
+                col.prop(nodes['Mapping'], "rotation")                
+            if 'Mix' in nodes:
+                col = box.column(align = True)
+                col.prop(nodes['Mix'].inputs[2], "default_value", text = "Tint")        
+                col.prop(nodes['Mix'].inputs[0], "default_value", text = "Factor")
+            if 'Gamma' in nodes:
+                col = box.column()
+                col.prop(nodes['Gamma'].inputs[1], "default_value", text = "Gamma")
+            if 'Saturation' in nodes:
+                col = box.column()
+                col.prop(nodes['Saturation'].inputs[1], "default_value", text = "Saturation")                
+    
                     
 # Settings Menu
 class SettingsMenu(Menu):
